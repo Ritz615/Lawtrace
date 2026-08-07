@@ -1,154 +1,180 @@
-/**
- * LexAI – API Client
- * Centralized fetch wrapper for all backend calls
- */
+// Typed API client for LexAI frontend — all endpoints with auth headers.
+import axios from "axios";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-const API_V1 = `${API_BASE}/api/v1`;
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
 
-interface ApiResponse<T = unknown> {
-  success?: boolean;
-  data?: T;
-  message?: string;
-  error?: string;
-}
+// ── Axios instance ─────────────────────────────────────────────────────────────
+const api = axios.create({
+  baseURL: BASE_URL,
+  headers: { "Content-Type": "application/json" },
+  withCredentials: false,
+});
 
-async function request<T>(
-  endpoint: string,
-  options: RequestInit = {}
-): Promise<T> {
-  const token =
-    typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
-
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(options.headers as Record<string, string>),
-  };
-
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
+// Attach Bearer token from localStorage on every request
+api.interceptors.request.use((config) => {
+  if (typeof window !== "undefined") {
+    const token = localStorage.getItem("access_token");
+    if (token) config.headers.Authorization = `Bearer ${token}`;
   }
+  return config;
+});
 
-  const res = await fetch(`${API_V1}${endpoint}`, {
-    ...options,
-    headers,
-  });
-
-  if (res.status === 401) {
-    // Try refresh
-    typeof window !== "undefined" && localStorage.removeItem("access_token");
-    window.location.href = "/auth/login";
-    throw new Error("Unauthorized");
+// Auto-refresh on 401
+api.interceptors.response.use(
+  (r) => r,
+  async (error) => {
+    const original = error.config;
+    if (error.response?.status === 401 && !original._retry) {
+      original._retry = true;
+      const refresh = localStorage.getItem("refresh_token");
+      if (refresh) {
+        try {
+          const res = await axios.post(`${BASE_URL}/auth/refresh`, { refresh_token: refresh });
+          const newToken = res.data.access_token;
+          localStorage.setItem("access_token", newToken);
+          original.headers.Authorization = `Bearer ${newToken}`;
+          return api(original);
+        } catch {
+          localStorage.clear();
+          window.location.href = "/auth/login";
+        }
+      }
+    }
+    return Promise.reject(error.response?.data || error);
   }
+);
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || err.error || "Request failed");
-  }
-
-  return res.json() as Promise<T>;
-}
-
-// ── Auth ──────────────────────────────────────────────────────────────────────
+// ── Auth ───────────────────────────────────────────────────────────────────────
 export const authApi = {
-  register: (data: {
-    email: string;
-    full_name: string;
-    password: string;
-    role?: string;
-  }) => request("/auth/register", { method: "POST", body: JSON.stringify(data) }),
-
-  login: (email: string, password: string) => {
-    const form = new URLSearchParams({ username: email, password });
-    return request("/auth/login", {
-      method: "POST",
-      body: form.toString(),
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    });
+  login: async (email: string, password: string) => {
+    const { data } = await api.post("/auth/login", { email, password });
+    return data;
   },
-
-  refresh: (refresh_token: string) =>
-    request("/auth/refresh", {
-      method: "POST",
-      body: JSON.stringify({ refresh_token }),
-    }),
-
-  forgotPassword: (email: string) =>
-    request("/auth/forgot-password", {
-      method: "POST",
-      body: JSON.stringify({ email }),
-    }),
+  register: async (payload: { email: string; full_name: string; password: string; role: string }) => {
+    const { data } = await api.post("/auth/register", payload);
+    return data;
+  },
+  refresh: async (refresh_token: string) => {
+    const { data } = await api.post("/auth/refresh", { refresh_token });
+    return data;
+  },
+  forgotPassword: async (email: string) => {
+    const { data } = await api.post("/auth/forgot-password", { email });
+    return data;
+  },
+  resetPassword: async (token: string, new_password: string) => {
+    const { data } = await api.post("/auth/reset-password", { token, new_password });
+    return data;
+  },
+  me: async () => {
+    const { data } = await api.get("/auth/me");
+    return data;
+  },
 };
 
-// ── Documents ─────────────────────────────────────────────────────────────────
+// ── Documents ──────────────────────────────────────────────────────────────────
 export const documentsApi = {
-  upload: (file: File, folder?: string, tags?: string[]) => {
+  upload: async (file: File, folder?: string, tags?: string) => {
     const form = new FormData();
     form.append("file", file);
-    if (folder) form.append("folder", folder);
-    if (tags) form.append("tags", tags.join(","));
-    return request("/documents/upload", {
-      method: "POST",
-      body: form,
-      headers: {},
+    const params = new URLSearchParams();
+    if (folder) params.append("folder", folder);
+    if (tags) params.append("tags", tags);
+    const { data } = await api.post(`/documents/upload?${params}`, form, {
+      headers: { "Content-Type": "multipart/form-data" },
     });
+    return data;
   },
-
-  list: (params?: { folder?: string; tag?: string; search?: string; page?: number }) => {
-    const q = new URLSearchParams(params as Record<string, string>);
-    return request(`/documents/?${q}`);
+  list: async (params?: { folder?: string; tag?: string; search?: string; page?: number; limit?: number }) => {
+    const { data } = await api.get("/documents/", { params });
+    return data;
   },
-
-  get: (id: string) => request(`/documents/${id}`),
-  delete: (id: string) => request(`/documents/${id}`, { method: "DELETE" }),
-  versions: (id: string) => request(`/documents/${id}/versions`),
+  get: async (id: string) => {
+    const { data } = await api.get(`/documents/${id}`);
+    return data;
+  },
+  delete: async (id: string) => {
+    const { data } = await api.delete(`/documents/${id}`);
+    return data;
+  },
+  getDownloadUrl: async (id: string) => {
+    const { data } = await api.get(`/documents/${id}/download-url`);
+    return data;
+  },
+  getVersions: async (id: string) => {
+    const { data } = await api.get(`/documents/${id}/versions`);
+    return data;
+  },
 };
 
-// ── AI ────────────────────────────────────────────────────────────────────────
+// ── AI ─────────────────────────────────────────────────────────────────────────
 export const aiApi = {
-  analyze: (document_id: string) =>
-    request("/ai/analyze", { method: "POST", body: JSON.stringify({ document_id }) }),
-
-  chat: (document_id: string, question: string, history: unknown[] = []) =>
-    request("/ai/chat", {
-      method: "POST",
-      body: JSON.stringify({ document_id, question, conversation_history: history }),
-    }),
-
-  compare: (document_id_a: string, document_id_b: string) =>
-    request("/ai/compare", {
-      method: "POST",
-      body: JSON.stringify({ document_id_a, document_id_b }),
-    }),
-
-  generate: (contract_type: string, form_data: Record<string, unknown>) =>
-    request("/ai/generate", {
-      method: "POST",
-      body: JSON.stringify({ contract_type, form_data }),
-    }),
+  analyze: async (document_id: string) => {
+    const { data } = await api.post("/ai/analyze", { document_id });
+    return data;
+  },
+  chat: async (document_id: string, question: string, history: object[] = []) => {
+    const { data } = await api.post("/ai/chat", { document_id, question, conversation_history: history });
+    return data;
+  },
+  compare: async (document_id_a: string, document_id_b: string) => {
+    const { data } = await api.post("/ai/compare", { document_id_a, document_id_b });
+    return data;
+  },
+  generate: async (contract_type: string, form_data: Record<string, string>) => {
+    const { data } = await api.post("/ai/generate", { contract_type, form_data });
+    return data;
+  },
+  getReport: async (document_id: string) => {
+    const { data } = await api.get(`/ai/report/${document_id}`);
+    return data;
+  },
 };
 
-// ── Analytics ─────────────────────────────────────────────────────────────────
+// ── Analytics ──────────────────────────────────────────────────────────────────
 export const analyticsApi = {
-  overview: () => request("/analytics/overview"),
-  monthlyUploads: (months = 6) => request(`/analytics/monthly-uploads?months=${months}`),
-  riskDistribution: () => request("/analytics/risk-distribution"),
-  contractTypes: () => request("/analytics/contract-types"),
+  summary: async () => {
+    const { data } = await api.get("/analytics/summary");
+    return data;
+  },
+  monthly: async (months = 6) => {
+    const { data } = await api.get("/analytics/monthly", { params: { months } });
+    return data;
+  },
+  riskByType: async () => {
+    const { data } = await api.get("/analytics/risk-by-type");
+    return data;
+  },
+  expiring: async (days = 30) => {
+    const { data } = await api.get("/analytics/expiring", { params: { days } });
+    return data;
+  },
 };
 
-// ── Notifications ─────────────────────────────────────────────────────────────
+// ── Notifications ──────────────────────────────────────────────────────────────
 export const notificationsApi = {
-  list: () => request("/notifications/"),
-  markRead: (id: string) => request(`/notifications/${id}/read`, { method: "PATCH" }),
-  markAllRead: () => request("/notifications/read-all", { method: "PATCH" }),
+  list: async (unread_only = false) => {
+    const { data } = await api.get("/notifications/", { params: { unread_only } });
+    return data;
+  },
+  markRead: async (id: string) => {
+    const { data } = await api.patch(`/notifications/${id}/read`);
+    return data;
+  },
+  markAllRead: async () => {
+    const { data } = await api.patch("/notifications/read-all");
+    return data;
+  },
+  delete: async (id: string) => {
+    const { data } = await api.delete(`/notifications/${id}`);
+    return data;
+  },
 };
 
-// ── Reports ───────────────────────────────────────────────────────────────────
+// ── Reports ────────────────────────────────────────────────────────────────────
 export const reportsApi = {
-  generate: (document_id: string) =>
-    request(`/reports/generate/${document_id}`, { method: "POST" }),
-  downloadPdf: (report_id: string) =>
-    `${API_V1}/reports/${report_id}/download/pdf`,
-  downloadDocx: (report_id: string) =>
-    `${API_V1}/reports/${report_id}/download/docx`,
+  downloadPdf: (document_id: string) => `${BASE_URL}/reports/${document_id}/pdf`,
+  downloadDocx: (document_id: string) => `${BASE_URL}/reports/${document_id}/docx`,
 };
+
+export default api;

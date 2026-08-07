@@ -1,159 +1,144 @@
 version: "3.9"
 
 services:
-  # ── PostgreSQL ───────────────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
-    container_name: lexai_postgres
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-lexai}
       POSTGRES_USER: ${POSTGRES_USER:-lexai_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lexai_password}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lexai_user}"]
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - lexai_network
 
-  # ── Redis ─────────────────────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
-    container_name: lexai_redis
-    command: redis-server --appendonly yes
-    volumes:
-      - redis_data:/data
+    restart: unless-stopped
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - lexai_network
 
-  # ── MinIO (S3-compatible storage) ─────────────────────────────────────────────
   minio:
     image: minio/minio:latest
-    container_name: lexai_minio
+    restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
     volumes:
       - minio_data:/data
-    ports:
-      - "9000:9000"   # API
-      - "9001:9001"   # Web console
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "mc", "ready", "local"]
       interval: 30s
-      timeout: 10s
+      timeout: 20s
       retries: 3
-    networks:
-      - lexai_network
 
-  # ── ChromaDB (Vector Database) ────────────────────────────────────────────────
   chromadb:
     image: chromadb/chroma:latest
-    container_name: lexai_chromadb
-    volumes:
-      - chroma_data:/chroma/chroma
+    restart: unless-stopped
     ports:
       - "8001:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
     environment:
       IS_PERSISTENT: "TRUE"
       ANONYMIZED_TELEMETRY: "FALSE"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    networks:
-      - lexai_network
 
-  # ── FastAPI Backend ────────────────────────────────────────────────────────────
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: lexai_backend
-    env_file: .env
-    environment:
-      POSTGRES_HOST: postgres
-      REDIS_HOST: redis
-      CHROMA_HOST: chromadb
-      MINIO_ENDPOINT: minio:9000
-    volumes:
-      - ./backend:/app
-      - uploads_data:/app/uploads
+    restart: unless-stopped
     ports:
       - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-lexai_user}:${POSTGRES_PASSWORD:-lexai_password}@postgres:5432/${POSTGRES_DB:-lexai}
+      REDIS_URL: redis://redis:6379/0
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_BUCKET: ${MINIO_BUCKET:-lexai-documents}
+      MINIO_SECURE: "false"
+      CHROMA_HOST: chromadb
+      CHROMA_PORT: "8000"
+      SECRET_KEY: ${SECRET_KEY:-changeme_in_production_please}
+      JWT_ALGORITHM: HS256
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-    networks:
-      - lexai_network
+      minio:
+        condition: service_started
+      chromadb:
+        condition: service_started
+    volumes:
+      - ./backend:/app
+    command: >
+      sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 
-  # ── Celery Worker ─────────────────────────────────────────────────────────────
   celery_worker:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: lexai_celery
-    env_file: .env
+    restart: unless-stopped
     environment:
-      POSTGRES_HOST: postgres
-      REDIS_HOST: redis
-      CHROMA_HOST: chromadb
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-lexai_user}:${POSTGRES_PASSWORD:-lexai_password}@postgres:5432/${POSTGRES_DB:-lexai}
+      REDIS_URL: redis://redis:6379/0
       MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_BUCKET: ${MINIO_BUCKET:-lexai-documents}
+      MINIO_SECURE: "false"
+      CHROMA_HOST: chromadb
+      CHROMA_PORT: "8000"
+      SECRET_KEY: ${SECRET_KEY:-changeme_in_production_please}
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3}
+    depends_on:
+      - redis
+      - postgres
     volumes:
       - ./backend:/app
-      - uploads_data:/app/uploads
-    depends_on:
-      - backend
-      - redis
-    command: celery -A app.workers.celery_app worker --loglevel=info
-    networks:
-      - lexai_network
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
 
-  # ── Next.js Frontend ──────────────────────────────────────────────────────────
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: lexai_frontend
-    env_file: .env
-    environment:
-      NEXT_PUBLIC_API_URL: http://backend:8000
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-      - /app/.next
+    restart: unless-stopped
     ports:
       - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
     depends_on:
       - backend
-    command: npm run dev
-    networks:
-      - lexai_network
 
 volumes:
   postgres_data:
   redis_data:
   minio_data:
   chroma_data:
-  uploads_data:
-
-networks:
-  lexai_network:
-    driver: bridge

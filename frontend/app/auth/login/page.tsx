@@ -7,18 +7,24 @@ import { z } from "zod";
 import { motion } from "framer-motion";
 import Link from "next/link";
 import { Scale, Mail, Lock, Eye, EyeOff, ArrowRight } from "lucide-react";
+import { useAuthStore } from "@/store/auth";
+import { authApi } from "@/lib/api";
+import { useRedirectIfAuthed } from "@/hooks/useAuth";
+import type { User } from "@/types";
 
 const loginSchema = z.object({
   email: z.string().email("Invalid email address"),
   password: z.string().min(8, "Password must be at least 8 characters"),
 });
-
 type LoginForm = z.infer<typeof loginSchema>;
 
 export default function LoginPage() {
+  useRedirectIfAuthed();
+
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { login } = useAuthStore();
 
   const { register, handleSubmit, formState: { errors } } = useForm<LoginForm>({
     resolver: zodResolver(loginSchema),
@@ -28,16 +34,25 @@ export default function LoginPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const { authApi } = await import("@/lib/api");
       const res = await authApi.login(data.email, data.password) as {
-        access_token: string;
-        refresh_token: string;
+        data: { access_token: string; refresh_token: string; user: User };
       };
-      localStorage.setItem("access_token", res.access_token);
-      localStorage.setItem("refresh_token", res.refresh_token);
-      window.location.href = "/dashboard";
+      const { access_token, refresh_token, user } = res.data;
+      // Persist to localStorage for API client
+      localStorage.setItem("access_token", access_token);
+      localStorage.setItem("refresh_token", refresh_token);
+      // Set cookie for middleware
+      document.cookie = `access_token=${access_token}; path=/; max-age=86400; SameSite=Strict`;
+      // Update Zustand store
+      login(user, access_token, refresh_token);
+      // Redirect to dashboard (or original requested route)
+      const params = new URLSearchParams(window.location.search);
+      window.location.href = params.get("redirect") || "/dashboard";
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Login failed. Check your credentials.");
+      const msg = err instanceof Error
+        ? err.message
+        : (err as { message?: string })?.message ?? "Login failed. Check your credentials.";
+      setError(msg);
     } finally {
       setIsLoading(false);
     }
@@ -45,7 +60,6 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen gradient-mesh flex items-center justify-center p-4">
-      {/* Background orbs */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/10 rounded-full blur-3xl" />
         <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-accent/8 rounded-full blur-3xl" />
@@ -57,7 +71,6 @@ export default function LoginPage() {
         transition={{ duration: 0.4 }}
         className="w-full max-w-md relative z-10"
       >
-        {/* Logo */}
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-2 mb-4">
             <Scale className="h-8 w-8 text-primary" />
@@ -67,7 +80,6 @@ export default function LoginPage() {
           <p className="text-muted-foreground mt-1">Sign in to your account</p>
         </div>
 
-        {/* Card */}
         <div className="bg-card/80 backdrop-blur-xl border border-border rounded-2xl p-8 shadow-xl">
           {error && (
             <motion.div
@@ -80,7 +92,6 @@ export default function LoginPage() {
           )}
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
-            {/* Email */}
             <div className="space-y-1.5">
               <label htmlFor="email" className="text-sm font-medium">Email</label>
               <div className="relative">
@@ -94,12 +105,9 @@ export default function LoginPage() {
                              focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
                 />
               </div>
-              {errors.email && (
-                <p className="text-xs text-destructive">{errors.email.message}</p>
-              )}
+              {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
             </div>
 
-            {/* Password */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label htmlFor="password" className="text-sm font-medium">Password</label>
@@ -126,12 +134,9 @@ export default function LoginPage() {
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
-              {errors.password && (
-                <p className="text-xs text-destructive">{errors.password.message}</p>
-              )}
+              {errors.password && <p className="text-xs text-destructive">{errors.password.message}</p>}
             </div>
 
-            {/* Submit */}
             <button
               id="login-submit"
               type="submit"
