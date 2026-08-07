@@ -1,37 +1,35 @@
-"""Pydantic schemas for authentication endpoints."""
-from pydantic import BaseModel, EmailStr
-from app.models.models import UserRole
+"""Pydantic schemas for auth endpoints."""
+from pydantic import BaseModel, EmailStr, Field
+from typing import Any, Optional
 
 
-class UserRegisterRequest(BaseModel):
+class LoginRequest(BaseModel):
     email: EmailStr
-    full_name: str
-    password: str
-    role: UserRole = UserRole.CLIENT
+    password: str = Field(min_length=8)
 
 
-class UserResponse(BaseModel):
-    id: str
-    email: str
-    full_name: str
-    role: UserRole
-    is_active: bool
-    is_verified: bool
-
-    class Config:
-        from_attributes = True
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    full_name: str = Field(min_length=2, max_length=100)
+    password: str = Field(min_length=8)
+    role: str = "client"
 
 
-class UserLoginResponse(BaseModel):
+class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
-    token_type: str
-    user: UserResponse
+    token_type: str = "bearer"
+    user: dict[str, Any]
 
 
-class TokenRefreshRequest(BaseModel):
+class RefreshRequest(BaseModel):
     refresh_token: str
 
 
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str = Field(min_length=8)
