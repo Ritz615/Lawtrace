@@ -174,15 +174,22 @@ Processing handled asynchronously via **Celery + Redis**.
 
 ## Development Phases
 
-| Phase | Focus | Status |
-|-------|-------|--------|
-| Phase 0 | Repo setup, Docker, Knowledge Curator | 🔄 In Progress |
-| Phase 1 | Auth, DB models, layout shell | ⏳ Pending |
-| Phase 2 | Dashboard, Document Management | ⏳ Pending |
-| Phase 3 | AI Pipeline (OCR, RAG, Risk, Comparison) | ⏳ Pending |
-| Phase 4 | Contract Generator, Legal Research | ⏳ Pending |
-| Phase 5 | Reports, Notifications, Analytics | ⏳ Pending |
-| Phase 6 | Tests, Docker Prod, CI/CD | ⏳ Pending |
+| Phase | Focus | Status | Commit |
+|-------|-------|--------|--------|
+| Phase 0 | Repo setup, Docker, Knowledge Curator, README | ✅ Complete | `629633d` |
+| Phase 1 | Auth pages, layout shell, Document Manager, Zustand store | ✅ Complete | `73dfe4d` |
+| Phase 2 | Dashboard (live data), Document upload API, MinIO | 🔄 In Progress | — |
+| Phase 3 | AI Pipeline (OCR, LangGraph, RAG, Risk, Comparison) | ⏳ Pending | — |
+| Phase 4 | Contract Generator, Legal Research | ⏳ Pending | — |
+| Phase 5 | Reports (PDF/DOCX), Notifications, Analytics | ⏳ Pending | — |
+| Phase 6 | Tests, Docker Prod, GitHub Actions CI/CD | ⏳ Pending | — |
+
+### Live Development
+
+```
+Frontend: http://localhost:3000
+API Docs: http://localhost:8000/docs  (after docker-compose up)
+```
 
 ---
 

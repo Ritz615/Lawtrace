@@ -145,12 +145,14 @@ Types: `feat`, `fix`, `docs`, `chore`, `test`, `refactor`
 
 ## Current Phase
 
-**Phase 0 – Repository Setup** ✅ Started: 2026-08-07
+**Phase 2 – Dashboard & Document Management** 🔄 Started: 2026-08-07
 
 ### Phase Log
 | Date | Phase | Status | Notes |
 |------|-------|--------|-------|
-| 2026-08-07 | Phase 0 | In Progress | Scaffolding repo, Docker, Knowledge Curator |
+| 2026-08-07 | Phase 0 | ✅ Complete | 71 files scaffolded – Docker, backend, frontend, Knowledge Curator |
+| 2026-08-07 | Phase 1 | ✅ Complete | Auth pages, Zustand store, AppShell, Sidebar, Document Manager |
+| 2026-08-07 | Phase 2 | 🔄 In Progress | Dashboard live data, document upload API, MinIO |
 
 ---
 
